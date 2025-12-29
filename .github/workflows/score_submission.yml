@@ -1,0 +1,51 @@
+name: Score Submission
+
+on:
+  pull_request:
+    paths:
+      - "submissions/*.csv"
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -r starter_code/requirements.txt
+
+      - name: Find submission file
+        id: find_submission
+        run: |
+          SUBMISSION=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep 'submissions/.*\.csv$' | head -1)
+          if [ -z "$SUBMISSION" ]; then
+            echo "No submission file found in PR"
+            exit 1
+          fi
+          echo "submission_file=$SUBMISSION" >> $GITHUB_OUTPUT
+          echo "Found submission: $SUBMISSION"
+
+      - name: Run scoring
+        run: |
+          python scoring_script.py ${{ steps.find_submission.outputs.submission_file }}
+
+      - name: Comment PR with score
+        uses: actions/github-script@v6
+        if: success()
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('${{ github.workspace }}/score_output.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Submission Scored ✅\n\n${output}`
+            });
