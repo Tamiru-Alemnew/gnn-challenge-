@@ -1,0 +1,27 @@
+# Cold Start Citation Challenge 2026 - Requirements
+# Python 3.8+
+# Install with: pip install -r requirements.txt
+
+# Core scientific computing
+numpy>=1.21.0,<2.0.0
+pandas>=1.3.0,<3.0.0
+
+# Graph processing
+networkx>=2.6.0,<4.0.0
+
+# Machine learning
+scikit-learn>=1.0.0,<2.0.0
+
+# Utilities
+tqdm>=4.62.0
+
+# Optional: Deep learning (uncomment if using GNNs)
+# torch>=1.10.0
+# torch-geometric>=2.0.0
+
+# Optional: Visualization (uncomment if needed)
+# matplotlib>=3.4.0
+# seaborn>=0.11.0
+
+
+

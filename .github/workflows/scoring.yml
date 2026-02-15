@@ -1,0 +1,184 @@
+name: Score Submission
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'submissions/inbox/**'
+
+jobs:
+  validate-and-score:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history to see PR changes
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Detect submission path
+        id: detect_submission
+        run: |
+          # Find changed files in submissions/inbox/
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD | grep "^submissions/inbox/" || echo "")
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No submission files changed"
+            exit 0
+          fi
+          
+          # Extract submission directory (team/run)
+          SUBMISSION_DIR=$(echo "$CHANGED_FILES" | head -n1 | sed 's|submissions/inbox/\([^/]*/[^/]*\)/.*|\1|')
+          SUBMISSION_PATH="submissions/inbox/$SUBMISSION_DIR"
+          
+          echo "submission_path=$SUBMISSION_PATH" >> $GITHUB_OUTPUT
+          echo "Found submission: $SUBMISSION_PATH"
+      
+      - name: Validate submission
+        id: validate
+        if: steps.detect_submission.outputs.submission_path != ''
+        run: |
+          SUBMISSION_PATH="${{ steps.detect_submission.outputs.submission_path }}"
+          
+          echo "Validating submission at: $SUBMISSION_PATH"
+          
+          if python competition/validate_submission.py "$SUBMISSION_PATH"; then
+            echo "validation_status=✅ PASSED" >> $GITHUB_OUTPUT
+          else
+            echo "validation_status=❌ FAILED" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+      
+      - name: Score submission
+        id: score
+        if: steps.validate.outputs.validation_status == '✅ PASSED'
+        run: |
+          SUBMISSION_PATH="${{ steps.detect_submission.outputs.submission_path }}"
+          
+          echo "Scoring submission at: $SUBMISSION_PATH"
+          
+          # Run scoring script
+          python competition/score_submission.py \
+            "$SUBMISSION_PATH" \
+            data/private/test_labels.csv > score_output.txt
+          
+          # Extract key metrics from results.json
+          RESULTS_FILE="$SUBMISSION_PATH/results.json"
+          
+          if [ -f "$RESULTS_FILE" ]; then
+            F1_SCORE=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metrics']['f1_score'])")
+            PRECISION=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metrics']['precision'])")
+            RECALL=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metrics']['recall'])")
+            HIT_AT_5=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metrics']['hit@5'])")
+            TEAM_NAME=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metadata'].get('team_name', 'Unknown'))")
+            METHOD=$(python -c "import json; print(json.load(open('$RESULTS_FILE'))['metadata'].get('method', 'Unknown'))")
+            
+            echo "f1_score=$F1_SCORE" >> $GITHUB_OUTPUT
+            echo "precision=$PRECISION" >> $GITHUB_OUTPUT
+            echo "recall=$RECALL" >> $GITHUB_OUTPUT
+            echo "hit_at_5=$HIT_AT_5" >> $GITHUB_OUTPUT
+            echo "team_name=$TEAM_NAME" >> $GITHUB_OUTPUT
+            echo "method=$METHOD" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Comment on PR
+        if: steps.score.outputs.f1_score != ''
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const f1Score = '${{ steps.score.outputs.f1_score }}';
+            const precision = '${{ steps.score.outputs.precision }}';
+            const recall = '${{ steps.score.outputs.recall }}';
+            const hitAt5 = '${{ steps.score.outputs.hit_at_5 }}';
+            const teamName = '${{ steps.score.outputs.team_name }}';
+            const method = '${{ steps.score.outputs.method }}';
+            const submissionPath = '${{ steps.detect_submission.outputs.submission_path }}';
+            
+            const comment = `## 🏆 Submission Scored!
+            
+            **Team:** ${teamName}
+            **Method:** ${method}
+            **Submission:** \`${submissionPath}\`
+            
+            ### 📊 Results
+            
+            | Metric | Score |
+            |--------|-------|
+            | **F1-Score** ⭐ | **${f1Score}** |
+            | Precision | ${precision} |
+            | Recall | ${recall} |
+            | Hit@5 | ${hitAt5} |
+            
+            ### 🎯 Next Steps
+            
+            ${parseFloat(f1Score) > 0.5 ? '🎉 **Excellent score!** You\'re in the top tier!' : 
+              parseFloat(f1Score) > 0.3 ? '👍 **Good score!** Keep improving!' : 
+              parseFloat(f1Score) > 0.1 ? '📈 **Decent start!** There\'s room for improvement.' : 
+              '💡 **Keep trying!** Consider using GNN methods (GraphSAGE, GAT).'}
+            
+            ${method === 'human' ? '👨‍💻 **Human-written solution** - Great coding!' : 
+              method === 'llm' ? '🤖 **LLM-generated solution** - Interesting approach!' : 
+              '🔀 **Hybrid solution** - Best of both worlds!'}
+            
+            ---
+            
+            *If this score looks correct, merge this PR to update the leaderboard!*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Update leaderboard (on merge)
+        if: github.event.pull_request.merged == true && steps.score.outputs.f1_score != ''
+        run: |
+          # NeurIPS Requirement 2: Only commit leaderboard.csv, NOT submission files
+          # Add entry to leaderboard CSV
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          echo "${{ steps.score.outputs.team_name }},${{ steps.score.outputs.method }},${{ steps.score.outputs.f1_score }},$TIMESTAMP" >> leaderboard/leaderboard.csv
+          
+          # NeurIPS Requirement 3: Dense ranking for ties (Kaggle-style)
+          # Sort by score (descending), then by timestamp (ascending) for tie-breaking
+          python3 << 'PYTHON_SCRIPT'
+          import pandas as pd
+          import sys
+          
+          # Read leaderboard
+          df = pd.read_csv('leaderboard/leaderboard.csv')
+          
+          # Sort by score (desc), then timestamp (asc) for tie-breaking
+          df = df.sort_values(['score', 'timestamp'], ascending=[False, True])
+          
+          # Assign dense ranks (ties share same rank, next rank skips)
+          df['rank'] = df['score'].rank(method='dense', ascending=False).astype(int)
+          
+          # Reorder columns: rank, team, method, score, timestamp
+          df = df[['rank', 'team', 'method', 'score', 'timestamp']]
+          
+          # Save
+          df.to_csv('leaderboard/leaderboard.csv', index=False)
+          PYTHON_SCRIPT
+          
+          # Commit ONLY leaderboard.csv (NeurIPS Requirement 2: Privacy)
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add leaderboard/leaderboard.csv
+          git commit -m "Update leaderboard: ${{ steps.score.outputs.team_name }} - F1: ${{ steps.score.outputs.f1_score }}"
+          git push
+
+
+

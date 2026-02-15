@@ -1,3 +1,6 @@
+# Private data - NEVER commit ground truth labels
+data/private/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -7,15 +10,10 @@ __pycache__/
 venv/
 env/
 ENV/
-
-# Data files (organizers should generate these)
-data/train.csv
-data/test.csv
-data/test_labels.csv
-
-# Submissions (keep sample, ignore others)
-submissions/*.csv
-!submissions/sample_submission.csv
+.venv
+*.egg-info/
+dist/
+build/
 
 # IDE
 .vscode/
@@ -27,3 +25,5 @@ submissions/*.csv
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
