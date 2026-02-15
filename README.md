@@ -275,7 +275,7 @@ See `organizer_tools/README.md` for dataset generation and scoring utilities.
 
 - **Issues**: [GitHub Issues](https://github.com/your-org/gnn-challenge/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/gnn-challenge/discussions)
-- **Email**: challenge@your-org.com
+- **Email**: 
 
 ---
 
