@@ -15,6 +15,9 @@ scikit-learn>=1.0.0,<2.0.0
 # Utilities
 tqdm>=4.62.0
 
+# Crypto
+cryptography>=42.0.0
+
 # Optional: Deep learning (uncomment if using GNNs)
 # torch>=1.10.0
 # torch-geometric>=2.0.0
